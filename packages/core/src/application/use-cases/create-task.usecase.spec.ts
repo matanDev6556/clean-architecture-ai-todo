@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CreateTaskUseCase } from './create-task.usecase';
-import { TaskRepository } from '../ports/task-repository.interface';
+import { TaskRepository } from '../../domain/ports/task-repository.interface';
 
 const mockRepo = {
   create: vi.fn((t) => Promise.resolve({ ...t, id: '1', createdAt: new Date(), updatedAt: new Date(), status: 'open' })),
@@ -17,15 +17,21 @@ describe('CreateTaskUseCase', () => {
 
   it('should auto-enhance task if requested', async () => {
     const mockLLM = {
-      enhanceDescription: vi.fn().mockResolvedValue({ summary: 'Enhanced' }),
+      generateJson: vi.fn().mockResolvedValue({ 
+        summary: 'Enhanced',
+        steps: ['Step 1'],
+        risks: ['Risk 1'],
+        estimateHours: 2
+      }),
     };
     const useCase = new CreateTaskUseCase(mockRepo, mockLLM as any);
     
     await useCase.execute({ title: 'Task' }, true);
     
-    expect(mockLLM.enhanceDescription).toHaveBeenCalled();
+    expect(mockLLM.generateJson).toHaveBeenCalled();
     expect(mockRepo.create).toHaveBeenCalledWith(expect.objectContaining({ 
-      enhancedDescription: JSON.stringify({ summary: 'Enhanced' }) 
+      enhancedDescription: expect.any(String),
+      isAiGenerated: true
     }));
   });
 });

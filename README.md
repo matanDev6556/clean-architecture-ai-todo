@@ -34,6 +34,7 @@ graph TB
         subgraph "Presentation Layer"
             Routes[task.routes.ts<br/>Express Routes]
             Controller[TaskController<br/>HTTP Handler]
+            ErrorMiddleware[Error Handler<br/>Middleware]
         end
         
         CompositionRoot[Composition Root<br/>Dependency Injection]
@@ -63,11 +64,16 @@ graph TB
             Ports[Ports - Interfaces<br/>LLMService<br/>TaskRepository]
         end
         
+        subgraph "Errors"
+            DomainErrors[Domain Errors<br/>NotFoundError<br/>ValidationError<br/>ServiceUnavailableError]
+        end
+        
         UseCases --> Ports
         UseCases --> DTOs
         UseCases --> Prompts
         UseCases --> Entities
         DTOs --> Entities
+        UseCases -.throws.-> DomainErrors
     end
 
     subgraph "External Services"
@@ -77,6 +83,7 @@ graph TB
     WebService -->|HTTP/JSON| Routes
     Routes --> Controller
     Controller --> UseCases
+    Controller -.catches.-> ErrorMiddleware
     
     CompositionRoot -.->|Injects| Controller
     CompositionRoot -.->|Creates| UseCases
@@ -91,10 +98,13 @@ graph TB
     
     GeminiService -->|API Call| Gemini
     
+    ErrorMiddleware -.uses.-> DomainErrors
+    
     style UI fill:#61dafb
     style WebService fill:#61dafb
     style Routes fill:#98FB98
     style Controller fill:#98FB98
+    style ErrorMiddleware fill:#FF6B6B
     style GeminiService fill:#FFA07A
     style MockService fill:#FFA07A
     style InMemoryRepo fill:#FFE4B5
@@ -103,6 +113,7 @@ graph TB
     style DTOs fill:#DDA0DD
     style Entities fill:#FFB6C1
     style Ports fill:#FFB6C1
+    style DomainErrors fill:#FFD700
     style Gemini fill:#FF6B6B
     style CompositionRoot fill:#87CEEB
 ```
@@ -113,8 +124,9 @@ graph TB
 |-------|---------------|----------|
 | **Domain** | Pure business logic, entities, interfaces | `packages/core/src/domain` |
 | **Application** | Use cases, DTOs, orchestration | `packages/core/src/application` |
+| **Errors** | Domain errors, custom exceptions | `packages/core/src/errors` |
 | **Infrastructure** | External services, databases, APIs | `apps/api/src/infrastructure` |
-| **Presentation** | HTTP layer, routes, controllers | `apps/api/src/presentation` |
+| **Presentation** | HTTP layer, routes, controllers, error middleware | `apps/api/src/presentation` |
 | **UI** | React components, hooks | `apps/web/src` |
 
 ---
@@ -182,7 +194,9 @@ graph TB
 │   │       │       └── mock-llm.service.ts
 │   │       ├── presentation/   # HTTP layer
 │   │       │   ├── controllers/
-│   │       │   └── routes/
+│   │       │   ├── routes/
+│   │       │   └── middlewares/
+│   │       │       └── error-handler.ts
 │   │       ├── config/
 │   │       │   └── composition-root.ts  # DI container
 │   │       └── server.ts
@@ -199,10 +213,12 @@ graph TB
             ├── domain/         # Pure domain layer
             │   ├── entities/
             │   └── ports/      # Interfaces
-            └── application/    # Application layer
-                ├── dtos/       # Data Transfer Objects
-                ├── use-cases/  # Business operations
-                └── prompts/    # AI prompt templates
+            ├── application/    # Application layer
+            │   ├── dtos/       # Data Transfer Objects
+            │   ├── use-cases/  # Business operations
+            │   └── prompts/    # AI prompt templates
+            └── errors/         # Domain errors
+                └── domain-errors.ts
 ```
 
 ---
@@ -388,4 +404,108 @@ interface LLMService {
 - Services are framework-agnostic (can reuse in Next.js)
 - Easier to test
 
+### 6. Error Handling with Middleware Pattern
+**Why:**
+- Centralized error handling in Express middleware
+- Custom domain errors (`NotFoundError`, `ValidationError`, `ServiceUnavailableError`)
+- Errors are part of domain language - live in `@todo/core`
+- Separation of concerns - controllers don't handle error formatting
 
+---
+
+## 🚨 Error Handling & Validation
+
+This application implements **production-grade error handling** following Express best practices.
+
+### Custom Domain Errors
+
+Located in `packages/core/src/errors/domain-errors.ts`:
+
+```typescript
+class DomainError extends Error {
+  constructor(message: string, readonly statusCode: number)
+}
+
+class NotFoundError extends DomainError        // 404
+class ValidationError extends DomainError       // 400
+class ServiceUnavailableError extends DomainError // 503
+```
+
+**Why in Core?** Errors are part of your domain language and should be shared across all applications.
+
+### Error Flow
+
+```
+Controller → throws DomainError
+    ↓
+Express next(error)
+    ↓
+Error Handler Middleware
+    ↓
+Formatted JSON Response
+```
+
+### Example Usage
+
+**In Use Case:**
+```typescript
+if (!task) {
+  throw new NotFoundError(`Task with id ${id} not found`);
+}
+```
+
+**In Controller:**
+```typescript
+try {
+  const task = await this.enhanceTaskUseCase.execute(id);
+  res.json(task);
+} catch (error) {
+  next(error);  // Middleware handles it
+}
+```
+
+**Error Response:**
+```json
+{
+  "error": "NotFoundError",
+  "message": "Task with id xyz not found"
+}
+```
+
+### Validation Errors
+
+Zod validation errors are automatically formatted:
+
+```json
+{
+  "error": "Validation Error",
+  "message": "Invalid request data",
+  "details": [
+    {
+      "field": "title",
+      "message": "Title must be less than 200 characters"
+    }
+  ]
+}
+```
+
+### HTTP Status Codes
+
+| Code | Error Type | Usage |
+|------|-----------|--------|
+| 400 | ValidationError | Invalid input data |
+| 404 | NotFoundError | Resource not found |
+| 500 | Internal Error | Unexpected errors |
+| 503 | ServiceUnavailableError | AI/External service down |
+
+### Benefits
+
+✅ **Type-Safe** - TypeScript knows error types  
+✅ **Reusable** - Errors shared across packages  
+✅ **Maintainable** - Single place to change error handling  
+✅ **Testable** - Easy to mock and test  
+✅ **Professional** - Follows Express best practices  
+
+---
+
+**Built with ❤️ using Clean Architecture principles**

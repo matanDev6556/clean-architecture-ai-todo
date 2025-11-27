@@ -1,11 +1,12 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { 
   CreateTaskUseCase, 
   ListTasksUseCase, 
   EnhanceTaskUseCase, 
   UpdateTaskUseCase,
   DeleteTaskUseCase,
-  CreateTaskSchema
+  CreateTaskSchema,
+  ValidationError
 } from '@todo/core';
 
 export class TaskController {
@@ -17,7 +18,7 @@ export class TaskController {
     private deleteTaskUseCase: DeleteTaskUseCase
   ) {}
 
-  create = async (req: Request, res: Response) => {
+  create = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const validatedData = CreateTaskSchema.parse(req.body);
       const { autoEnhance, ...taskData } = validatedData;
@@ -31,12 +32,11 @@ export class TaskController {
       );
       res.status(201).json(task);
     } catch (error) {
-      // Zod error handling could be improved here, but for now generic error
-      res.status(400).json({ error: (error as Error).message });
+      next(error);
     }
   };
 
-  list = async (req: Request, res: Response) => {
+  list = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { status, priority, search } = req.query;
       const tasks = await this.listTasksUseCase.execute({
@@ -46,37 +46,56 @@ export class TaskController {
       });
       res.json(tasks);
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      next(error);
     }
   };
 
-  enhance = async (req: Request, res: Response) => {
+  enhance = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
+      
+      if (!id) {
+        throw new ValidationError('Task ID is required');
+      }
+
       const task = await this.enhanceTaskUseCase.execute(id);
       res.json(task);
     } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
+      next(error);
     }
   };
 
-  update = async (req: Request, res: Response) => {
+  update = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { id } = req.params;
-        const task = await this.updateTaskUseCase.execute(id, req.body);
-        res.json(task);
+      const { id } = req.params;
+      
+      if (!id) {
+        throw new ValidationError('Task ID is required');
+      }
+
+      if (!req.body || Object.keys(req.body).length === 0) {
+        throw new ValidationError('Update data is required');
+      }
+
+      const task = await this.updateTaskUseCase.execute(id, req.body);
+      res.json(task);
     } catch (error) {
-        res.status(500).json({ error: (error as Error).message });
+      next(error);
     }
   }
 
-  delete = async (req: Request, res: Response) => {
-      try {
-          const { id } = req.params;
-          await this.deleteTaskUseCase.execute(id);
-          res.status(204).send();
-      } catch (error) {
-          res.status(500).json({ error: (error as Error).message });
+  delete = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      
+      if (!id) {
+        throw new ValidationError('Task ID is required');
       }
+
+      await this.deleteTaskUseCase.execute(id);
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
   }
 }
